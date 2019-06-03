@@ -11,10 +11,17 @@ from pydantic.dataclasses import dataclass
 current_dir = os.path.dirname(os.path.abspath(__file__))
 
 
+class NumericQuantity(BaseModel):
+    """Numeric quantity with a specified unit."""
+    value: Union[int, float] = None
+    units: str
+
+
 class TimeSeries(BaseModel):
     """Time series dictionary-like objects."""
     data_type: str = 'time_series'
-    values: Dict[Union[int,datetime],float] = None
+    values: Dict[Union[int, datetime], float] = None
+    units: str
 
 
 class CostCurveType(str, Enum):
@@ -26,8 +33,8 @@ class CostCurveType(str, Enum):
 class CostCurve(BaseModel):
     """Cost curve dictionary-like objects."""
     data_type: str = 'cost_curve'
-    cost_curve_type: CostCurveType = None
-    # values: Union[Dict[str, float], List] = None
+    cost_curve_type: CostCurveType
+    values: Union[Dict[str, float], List]
 
     # @validator('values')
     # def values_match_cost_curve_type(cls, v, values, **kwargs):
@@ -66,14 +73,18 @@ class Load(BaseModel):
     q_load_shed: TimeSeries = None
 
 
+class FuelSupply(BaseModel):
+    pass
+
+
 class Generator(BaseModel):
     """Generator."""
-    p_min: Union[float, TimeSeries] = None
-    p_max: Union[float, TimeSeries] = None
+    p_min: Union[NumericQuantity, TimeSeries] = None
+    p_max: Union[NumericQuantity, TimeSeries] = None
     power_factor: float = None
     in_service: bool = None
-    fuel: str = None
-    bus: Union[int, str] = None
+    fuel: str
+    bus: Union[int, str]
     area: Union[int, str] = None
     zone: Union[int, str] = None
     owner: Union[int, str] = None
@@ -83,15 +94,15 @@ class Generator(BaseModel):
     p_cost: CostCurve = None
     q_cost: CostCurve = None
     startup_cost: List[Tuple[int, float]] = None
-    shutdown_cost: float = None
-    startup_capacity: float = None
-    shutdown_capacity: float = None
+    shutdown_cost: NumericQuantity = None
+    startup_capacity: NumericQuantity = None
+    shutdown_capacity: NumericQuantity = None
     ramp_up_60min: float = None
     ramp_down_60min: float = None
     min_up_time: Union[float, int] = None
     min_down_time: Union[float, int] = None
     initial_status: Union[float, int] = None
-    initial_p_output: float = None
+    initial_p_output: NumericQuantity = None
     initial_q_output: float = None
     pg: Union[float, TimeSeries] = None
     qg: Union[float, TimeSeries] = None
@@ -148,20 +159,21 @@ class ElementsDataModel(BaseModel):
     generator : Dict[str, Generator] = None 
     storage   : dict = None # TBD
     area      : dict = None # TBD
+    fuel_supply: Dict[str, FuelSupply] = None
 
 class SystemDataModel(BaseModel):
 
     time_indices : List[int] = None
 
-    time_period_length_minutes : int = None
+    time_period_length_minutes : NumericQuantity
 
-    baseMVA             : float = None
+    baseMVA             : NumericQuantity
     reference_bus       : str = None
     reference_bus_angle : float = None
 
-    load_mismatch_cost     : float = None
-    reserve_shortfall_cost : float = None
-    total_cost             : float = None
+    load_mismatch_cost     : NumericQuantity = None
+    reserve_shortfall_cost : NumericQuantity = None
+    total_cost             : NumericQuantity = None
 
     reserve_requirement              : TimeSeries = None
     spinning_reserve_requirement     : TimeSeries = None
@@ -179,19 +191,44 @@ class SystemDataModel(BaseModel):
     regulation_down_shortfall        : TimeSeries = None
     flexible_ramp_up_shortfall       : TimeSeries = None
     flexible_ramp_down_shortfall     : TimeSeries = None
-    supplmental_shortfall            : TimeSeries = None
-    
-class UnitCommitmentSolutionDataModel(BaseModel):
+    supplemental_shortfall           : TimeSeries = None
 
-    elements : ElementsDataModel = None
-    system   : SystemDataModel = None
+    @validator('time_period_length_minutes')
+    def time_period_length_minutes_units(cls, v):
+        if v.units != 'min':
+            raise ValueError('time_period_length_minutes must have units of min.')
+    
+    @validator('load_mismatch_cost')
+    def load_mismatch_cost_units(cls, v):
+        if v.units != '$':
+            raise ValueError('load_mismatch_cost must have units of $.')
+    
+    @validator('reserve_shortfall_cost')
+    def reserve_shortfall_cost_units(cls, v):
+        if v.units != '$':
+            raise ValueError('reserve_shortfall_cost must have units of $.')
+
+    @validator('baseMVA')
+    def baseMVA_units(cls, v):
+        if v.units != 'MVA':
+            raise ValueError('baseMVA must have units of MVA.')
+    
+    @validator('total_cost')
+    def total_cost_units(cls, v):
+        if v.units != '$':
+            raise ValueError('total_cost must have units of $.')
+    
+class UnitCommitmentDataModel(BaseModel):
+
+    elements : ElementsDataModel
+    system   : SystemDataModel
 
 print("")
 print("")
 print("SCHEMA IS...")
-print(UnitCommitmentSolutionDataModel.schema_json(indent=2))
+print(UnitCommitmentDataModel.schema_json(indent=2))
 
-input_json_file_name = os.path.join(current_dir, 'uc_test_instances', 'tiny_uc_1_results.json')
+input_json_file_name = os.path.join(current_dir, 'uc_test_instances', 'schema_demo_tiny_uc_2.json')
 input_json = json.load(open(input_json_file_name, 'r'))
 print(input_json_file_name)
 
@@ -199,24 +236,24 @@ print("")
 print("")
 print("CALLING VALIDATOR...")
 try:
-    uc_data = UnitCommitmentSolutionDataModel(elements = input_json["elements"],
-                                              system = input_json["system"])
+    uc_data = UnitCommitmentDataModel(elements = input_json["elements"],
+                                    system = input_json["system"])
 except ValidationError as e:
     print(e)
 else:
     print("SUCCESS!")
 
-input_json_file_name = os.path.join(current_dir, 'uc_test_instances', 'test_case_1.json')
-input_json = json.load(open(input_json_file_name, 'r'))
-print(input_json_file_name)
+# input_json_file_name = os.path.join(current_dir, 'uc_test_instances', 'test_case_1.json')
+# input_json = json.load(open(input_json_file_name, 'r'))
+# print(input_json_file_name)
 
-print("")
-print("")
-print("CALLING VALIDATOR...")
-try:
-    uc_data = UnitCommitmentSolutionDataModel(elements = input_json["elements"],
-                                              system = input_json["system"])
-except ValidationError as e:
-    print(e)
-else:
-    print("SUCCESS!")
+# print("")
+# print("")
+# print("CALLING VALIDATOR...")
+# try:
+#     uc_data = UnitCommitmentSolutionDataModel(elements = input_json["elements"],
+#                                               system = input_json["system"])
+# except ValidationError as e:
+#     print(e)
+# else:
+#     print("SUCCESS!")
