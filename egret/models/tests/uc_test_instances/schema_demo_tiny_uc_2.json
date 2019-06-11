@@ -8,7 +8,6 @@
                 "bus": "Bus1",
                 "in_service": true,
                 "p_load": {
-                    "data_type": "time_series",
                     "units": "MW",
                     "values": {
                         "1": 220.0,
@@ -39,7 +38,7 @@
                 }
             }
         },
-        "generator": {
+        "thermal_generator": {
             "GEN1": {
                 "generator_type": "thermal",
                 "bus": "Bus1",
@@ -55,8 +54,14 @@
                     "value": 455,
                     "units": "MW"
                 },
-                "ramp_up_60min": 225,
-                "ramp_down_60min": 225,
+                "ramp_up_60min": {
+                    "value": 225,
+                    "units": "MW/hr"
+                },
+                "ramp_down_60min": {
+                    "value": 225,
+                    "units": "MW/hr"
+                },
                 "startup_capacity": {
                     "value": 150,
                     "units": "MW"
@@ -65,9 +70,18 @@
                     "value": 150,
                     "units": "MW"
                 },
-                "min_up_time": 8,
-                "min_down_time": 8,
-                "initial_status": 8,
+                "min_up_time": {
+                    "value": 8,
+                    "units": "hr"
+                },
+                "min_down_time": {
+                    "value": 8,
+                    "units": "hr"
+                },
+                "initial_status": {
+                    "value": 8,
+                    "units": "hr"
+                },
                 "initial_p_output": {
                     "value": 220.0,
                     "units": "MW"
@@ -113,12 +127,24 @@
                     ]
                 },
                 "agc_capable": true,
-                "ramp_agc": 3.75,
+                "ramp_agc": {
+                    "value": 3.75,
+                    "units": "MW/min"
+                },
                 "fast_start": false,
                 "supplemental_start": true,
-                "supplemental_non_spinning_capacity": 150,
-                "p_min_agc": 165.0,
-                "p_max_agc": 413.6363636363636,
+                "supplemental_non_spinning_capacity": {
+                    "value": 150,
+                    "units": "MW"
+                },
+                "p_min_agc": {
+                    "value": 165.0,
+                    "units": "MW"
+                },
+                "p_max_agc": {
+                    "value": 413.6363636363636,
+                    "units": "MW"
+                },
                 "fuel_supply": "fs_GEN1",
                 "p_fuel": {
                     "data_type": "fuel_curve",
@@ -171,8 +197,14 @@
                     "value": 162,
                     "units": "MW"
                 },
-                "ramp_up_60min": 60,
-                "ramp_down_60min": 60,
+                "ramp_up_60min": {
+                    "value": 60,
+                    "units": "MW/hr"
+                },
+                "ramp_down_60min": {
+                    "value": 60,
+                    "units": "MW/hr"
+                },
                 "startup_capacity": {
                     "value": 25,
                     "units": "MW"
@@ -181,9 +213,18 @@
                     "value": 25,
                     "units": "MW"
                 },
-                "min_up_time": 6,
-                "min_down_time": 6,
-                "initial_status": -6,
+                "min_up_time": {
+                    "value": 6,
+                    "units": "hr"
+                },
+                "min_down_time": {
+                    "value": 6,
+                    "units": "hr"
+                },
+                "initial_status": {
+                    "value": -6,
+                    "units": "hr"
+                },
                 "initial_p_output": {
                     "value": 0,
                     "units": "MW"
@@ -229,13 +270,28 @@
                     ]
                 },
                 "agc_capable": true,
-                "ramp_agc": 1.0,
+                "ramp_agc": {
+                    "value": 1.0,
+                    "units": "MW/min"
+                },
                 "fast_start": true,
                 "supplemental_start": true,
-                "supplemental_non_spinning_capacity": 25,
-                "non_spinning_capacity": 35.0,
-                "p_min_agc": 27.500000000000004,
-                "p_max_agc": 147.27272727272725
+                "supplemental_non_spinning_capacity": {
+                    "value": 25,
+                    "units": "MW"
+                },
+                "non_spinning_capacity": {
+                    "value": 35.0,
+                    "units": "MW"
+                },
+                "p_min_agc": {
+                    "value": 27.500000000000004,
+                    "units": "MW"
+                },
+                "p_max_agc": {
+                    "value": 147.27272727272725,
+                    "units": "MW"
+                }
             },
             "GEN6": {
                 "generator_type": "thermal",
@@ -252,8 +308,14 @@
                     "value": 80,
                     "units": "MW"
                 },
-                "ramp_up_60min": 60,
-                "ramp_down_60min": 60,
+                "ramp_up_60min": {
+                    "value": 60,
+                    "units": "MW/hr"
+                },
+                "ramp_down_60min": {
+                    "value": 60,
+                    "units": "MW/hr"
+                },
                 "startup_capacity": {
                     "value": 20,
                     "units": "MW"
@@ -262,9 +324,18 @@
                     "value": 20,
                     "units": "MW"
                 },
-                "min_up_time": 3,
-                "min_down_time": 3,
-                "initial_status": -3,
+                "min_up_time": {
+                    "value": 3,
+                    "units": "hr"
+                },
+                "min_down_time": {
+                    "value": 3,
+                    "units": "hr"
+                },
+                "initial_status": {
+                    "value": -3,
+                    "units": "hr"
+                },
                 "initial_p_output": {
                     "value": 0,
                     "units": "MW"
@@ -307,14 +378,29 @@
                 },
                 "fixed_commitment": null,
                 "agc_capable": true,
-                "ramp_agc": 1.0,
+                "ramp_agc": {
+                    "value": 1.0,
+                    "units": "MW/min"
+                },
                 "fast_start": true,
                 "supplemental_start": true,
-                "supplemental_non_spinning_capacity": 20,
-                "non_spinning_capacity": 30.0,
+                "supplemental_non_spinning_capacity": {
+                    "value": 20,
+                    "units": "MW"
+                },
+                "non_spinning_capacity": {
+                    "value": 30.0,
+                    "units": "MW"
+                },
                 "area": "Area1",
-                "p_min_agc": 22.0,
-                "p_max_agc": 72.72727272727272,
+                "p_min_agc": {
+                    "value": 22.0,
+                    "units": "MW"
+                },
+                "p_max_agc": {
+                    "value": 72.72727272727272,
+                    "units": "MW"
+                },
                 "p_fuel": {
                     "data_type": "fuel_curve",
                     "values": [
@@ -353,7 +439,7 @@
             "fs_GEN1": {
                 "fuel_supply_type": "instantaneous",
                 "fuel_available": {
-                    "data_type": "time_series",
+                    "units": "MBtu",
                     "values": {
                         "1": Infinity,
                         "2": 1000.0,
@@ -385,7 +471,7 @@
             "fs_GEN6": {
                 "fuel_supply_type": "instantaneous",
                 "fuel_available": {
-                    "data_type": "time_series",
+                    "units": "MBtu",
                     "values": {
                         "1": Infinity,
                         "2": Infinity,
