@@ -8,9 +8,9 @@
 #  ___________________________________________________________________________
 
 """ 
-This module provides supporting functions for interacting with the RTS-GMLC data
+This module provides supporting functions for interacting with standard format input data
 
-It includes methods to parse the RTS-GMLC data and load them into a TemporalGridNetwork object
+It includes methods to parse the data and load them into a TemporalGridNetwork object
 
 """
 
@@ -22,167 +22,185 @@ from datetime import datetime, timedelta
 from collections import namedtuple
 
 
-def convert_load_by_area_to_source(rts_gmlc_dir, begin_time, end_time, simulation='DAY_AHEAD', t0_state=None):
-    simulation = simulation.upper()
-    if simulation not in ["DAY_AHEAD", "REAL_TIME"]:
-        raise ValueError('simulation must be "DAY_AHEAD" or "REAL_TIME"')
-
-    base_dir = os.path.join(rts_gmlc_dir, 'SourceData')
-
-    begin_time, end_time = _get_datetimes(begin_time, end_time)
-
-
-    TimeSeriesPointer = namedtuple('TimeSeriesPointer',
-                                   ['Object',
-                                    'Simulation',
-                                    'Parameter',
-                                    'DataFile'])
-
-    DateTimeValue = namedtuple('DateTimeValue',
-                               ['DateTime', 'Value'])
-
-    Load = namedtuple('Load',
-                      ['DateTime',
-                       'Area1',
-                       'Area2',
-                       'Area3'])
-
-    timeseries_pointer_df = pd.read_csv(os.path.join(base_dir, "timeseries_pointers.csv"), header=0, sep=',')
-
-    time_delta = end_time - begin_time
-
-    hours = 24*time_delta.days + math.ceil(time_delta.seconds/3600.)
-
-    model_data = _create_rtsgmlc_skeleton(rts_gmlc_dir)
-
-    ## create an object for easy iterating
-    md_obj = md.ModelData(model_data)
-
-    system = md_obj.data["system"]
-    elements = md_obj.data["elements"]
-
-    if simulation == "DAY_AHEAD":
-        system["time_period_length_minutes"] = 60
-    else:
-        system["time_period_length_minutes"] = 5
-
-    # compute aggregate load per area, and then compute 
-    # load participation factors from each bus from that data.
-    region_total_load = {}
-    areas = ["Area"+str(i) for i in range(1,4)]
-    for this_region in areas:
-        this_region_total_load = 0.0
-        ## loads have exactly one bus
-        for name, load in md_obj.elements("load"):
-            bus = elements["bus"][load["bus"]]
-            if bus["area"] == this_region:
-                this_region_total_load += load["p_load"]
-        region_total_load[this_region] = this_region_total_load
-    
-    bus_load_participation_factor_dict = {}
-    bus_Ql_over_Pl_dict = {}
-    for name, load in md_obj.elements("load"):
-        bus = elements["bus"][load["bus"]]
-        bus_load_participation_factor_dict[name] = load["p_load"] / region_total_load[bus["area"]]
-        bus_Ql_over_Pl_dict[name] = load["q_load"] / load["p_load"]
-
-    timeseries_pointer_dict = {} 
-    for timeseries_pointer_index in timeseries_pointer_df.index.tolist():
-        this_timeseries_pointer_dict = timeseries_pointer_df.loc[timeseries_pointer_index].to_dict()
-        new_timeseries_pointer = TimeSeriesPointer(this_timeseries_pointer_dict["Object"],
-                                                   this_timeseries_pointer_dict["Simulation"],
-                                                   this_timeseries_pointer_dict["Parameter"],
-                                                   os.path.join(base_dir, this_timeseries_pointer_dict["Data File"]))
-    
-        timeseries_pointer_dict[(new_timeseries_pointer.Object, new_timeseries_pointer.Simulation)] = new_timeseries_pointer
-
-    load_timeseries_spec = timeseries_pointer_dict[("Load",simulation)]
-    load_timeseries_df = _read_rts_gmlc_table(load_timeseries_spec.DataFile, simulation)
-    load_timeseries_df = load_timeseries_df.rename(columns = {"Year_Month_Day_Period" : "DateTime"})
-    start_mask = load_timeseries_df["DateTime"] >= begin_time
-    end_mask = load_timeseries_df["DateTime"] < end_time
-    masked_load_timeseries_df = load_timeseries_df[start_mask & end_mask]
-    load_dict = masked_load_timeseries_df.to_dict(orient='split')
-    load_timeseries = []
-    for load_row in load_dict["data"]:
-        load_timeseries.append(Load(load_row[0],
-                                    float(load_row[1]),
-                                    float(load_row[2]),
-                                    float(load_row[3])))
-    
-    times = []
-    for load in load_timeseries:
-        times.append(str(load.DateTime))
-
-    system["time_indices"] = times
-
-    ## load into grid_network object
-    ## First, load Pl, Ql
-    for name, load in md_obj.elements("load"):
-        pl_dict, ql_dict = dict(), dict()
-        bus = elements["bus"][load["bus"]]
-        for load_time in load_timeseries:
-            area_load = getattr(load_time,bus["area"])
-            pl_dict[str(load_time.DateTime)] = round(bus_load_participation_factor_dict[name]*area_load,2)
-            ql_dict[str(load_time.DateTime)] = pl_dict[str(load_time.DateTime)]*bus_Ql_over_Pl_dict[name]
-        load["p_load"] = _make_time_series_dict(pl_dict)
-        load["q_load"] = _make_time_series_dict(ql_dict)
-    
-    new_load_time_series = []
-
-    day_ahead_load_file = '../timeseries_data_files/Load/new_load_time_series_DA.csv'
-    real_time_load_file = '../timeseries_data_files/Load/new_load_time_series_RT.csv'
-
-    for ix, load_time in enumerate(load_timeseries, start=0):
-        load_time_series_record = {}
-        load_time_series_record['Year'] = load_time.DateTime.year
-        load_time_series_record['Month'] = load_time.DateTime.month
-        load_time_series_record['Day'] = load_time.DateTime.day
-
-        if simulation == 'DAY_AHEAD':
-            load_time_series_record['Period'] = (ix % 24) + 1
-        else:
-            load_time_series_record['Period'] = (ix % (24*12)) + 1
-
-        for name, load in md_obj.elements('load'):
-            bus = elements['bus'][load['bus']]
-            area_load = getattr(load_time, bus['area'])
-
-            load_time_series_record[name] = round(bus_load_participation_factor_dict[name]*area_load, 2)
-            
-        new_load_time_series.append(load_time_series_record)
-
-    new_load_time_series_df = pd.DataFrame(new_load_time_series)
-    new_load_time_series_df.to_csv('new_load_time_series.csv', index=False)
-
-    # Augment time series pointer dataframe.
-    for name, load in md_obj.elements('load'):
-        new_load_timeseries_spec = {}
-        new_load_timeseries_spec['Object'] = name
-        new_load_timeseries_spec['Parameter'] = 'Requirement'
-        new_load_timeseries_spec['Simulation'] = 'DAY_AHEAD'
-        new_load_timeseries_spec['Data File'] = day_ahead_load_file
-        timeseries_pointer_df = timeseries_pointer_df.append(new_load_timeseries_spec, ignore_index=True)
-
-        new_load_timeseries_spec = {}
-        new_load_timeseries_spec['Object'] = name
-        new_load_timeseries_spec['Parameter'] = 'Requirement'
-        new_load_timeseries_spec['Simulation'] = 'REAL_TIME'
-        new_load_timeseries_spec['Data File'] = real_time_load_file
-        timeseries_pointer_df = timeseries_pointer_df.append(new_load_timeseries_spec, ignore_index=True)
-    
-    timeseries_pointer_df.loc[timeseries_pointer_df['Object'] != 'Load'].to_csv('new_time_series_pointers.csv', index=False)
-
-
-def create_ModelData(rts_gmlc_dir, begin_time, end_time, simulation="DAY_AHEAD", t0_state = None):
-
+def convert_load_by_area_to_source(data_dir, begin_time, end_time, t0_state=None):
     """
-    Create a ModelData object from the RTS-GMLC data.
+    Create a ModelData object from the input data. Assumes data is formatted like the RTS-GMLC repository's 'RTS_Data' directory.
 
     Parameters
     ----------
-    rts_gmlc_dir : str
-        Path to RTS-GMLC directory
+    data_dir : str
+        Path to data directory
+    begin_time : datetime.datetime or str
+        Beginning of time horizon. If str, date/time in "YYYY-MM-DD HH:MM:SS" or "YYYY-MM-DD" format,
+        the later of which assumes a midnight start.
+    end_time : datetime.datetime or str
+        End of time horizon. If str, date/time in "YYYY-MM-DD HH:MM:SS" or "YYYY-MM-DD" format,
+        the later of which assumes a midnight start.
+    t0_state : dict or Nonetype
+        Keys of this dict are thermal generator names, each element of which is another dictionary with
+        keys "initial_status", "initial_p_output", and "initial_q_output", which specify whether the
+        generator is on at t0, the real power output at t0, and the reactive power output at t0. 
+        If this is None, default values are loaded.
+    """
+    for simulation in ['DAY_AHEAD', 'REAL_TIME']:
+        simulation = simulation.upper()
+
+        base_dir = os.path.join(data_dir, 'SourceData')
+
+        begin_time, end_time = _get_datetimes(begin_time, end_time)
+
+
+        TimeSeriesPointer = namedtuple('TimeSeriesPointer',
+                                    ['Object',
+                                        'Simulation',
+                                        'Parameter',
+                                        'DataFile'])
+
+        DateTimeValue = namedtuple('DateTimeValue',
+                                ['DateTime', 'Value'])
+
+        Load = namedtuple('Load',
+                        ['DateTime',
+                        'Area1',
+                        'Area2',
+                        'Area3'])
+
+        timeseries_pointer_df = pd.read_csv(os.path.join(base_dir, "timeseries_pointers_orig.csv"), header=0, sep=',')
+
+        time_delta = end_time - begin_time
+
+        hours = 24*time_delta.days + math.ceil(time_delta.seconds/3600.)
+
+        model_data = _create_rtsgmlc_skeleton(rts_gmlc_dir)
+
+        ## create an object for easy iterating
+        md_obj = md.ModelData(model_data)
+
+        system = md_obj.data["system"]
+        elements = md_obj.data["elements"]
+
+        if simulation == "DAY_AHEAD":
+            system["time_period_length_minutes"] = 60
+        else:
+            system["time_period_length_minutes"] = 5
+
+        # compute aggregate load per area, and then compute 
+        # load participation factors from each bus from that data.
+        region_total_load = {}
+        areas = ["Area"+str(i) for i in range(1,4)]
+        for this_region in areas:
+            this_region_total_load = 0.0
+            ## loads have exactly one bus
+            for name, load in md_obj.elements("load"):
+                bus = elements["bus"][load["bus"]]
+                if bus["area"] == this_region:
+                    this_region_total_load += load["p_load"]
+            region_total_load[this_region] = this_region_total_load
+        
+        bus_load_participation_factor_dict = {}
+        bus_Ql_over_Pl_dict = {}
+        for name, load in md_obj.elements("load"):
+            bus = elements["bus"][load["bus"]]
+            bus_load_participation_factor_dict[name] = load["p_load"] / region_total_load[bus["area"]]
+            bus_Ql_over_Pl_dict[name] = load["q_load"] / load["p_load"]
+
+        timeseries_pointer_dict = {} 
+        for timeseries_pointer_index in timeseries_pointer_df.index.tolist():
+            this_timeseries_pointer_dict = timeseries_pointer_df.loc[timeseries_pointer_index].to_dict()
+            new_timeseries_pointer = TimeSeriesPointer(this_timeseries_pointer_dict["Object"],
+                                                    this_timeseries_pointer_dict["Simulation"],
+                                                    this_timeseries_pointer_dict["Parameter"],
+                                                    os.path.join(base_dir, this_timeseries_pointer_dict["Data File"]))
+        
+            timeseries_pointer_dict[(new_timeseries_pointer.Object, new_timeseries_pointer.Simulation)] = new_timeseries_pointer
+
+        load_timeseries_spec = timeseries_pointer_dict[("Load",simulation)]
+        load_timeseries_df = _read_rts_gmlc_table(load_timeseries_spec.DataFile, simulation)
+        load_timeseries_df = load_timeseries_df.rename(columns = {"Year_Month_Day_Period" : "DateTime"})
+        start_mask = load_timeseries_df["DateTime"] >= begin_time
+        end_mask = load_timeseries_df["DateTime"] < end_time
+        masked_load_timeseries_df = load_timeseries_df[start_mask & end_mask]
+        load_dict = masked_load_timeseries_df.to_dict(orient='split')
+        load_timeseries = []
+        for load_row in load_dict["data"]:
+            load_timeseries.append(Load(load_row[0],
+                                        float(load_row[1]),
+                                        float(load_row[2]),
+                                        float(load_row[3])))
+        
+        times = []
+        for load in load_timeseries:
+            times.append(str(load.DateTime))
+
+        system["time_indices"] = times
+
+        ## load into grid_network object
+        ## First, load Pl, Ql
+        for name, load in md_obj.elements("load"):
+            pl_dict, ql_dict = dict(), dict()
+            bus = elements["bus"][load["bus"]]
+            for load_time in load_timeseries:
+                area_load = getattr(load_time,bus["area"])
+                pl_dict[str(load_time.DateTime)] = round(bus_load_participation_factor_dict[name]*area_load,2)
+                ql_dict[str(load_time.DateTime)] = pl_dict[str(load_time.DateTime)]*bus_Ql_over_Pl_dict[name]
+            load["p_load"] = _make_time_series_dict(pl_dict)
+            load["q_load"] = _make_time_series_dict(ql_dict)
+        
+        new_load_time_series = []
+
+        day_ahead_load_file = '../timeseries_data_files/Load/new_load_time_series_DA.csv'
+        real_time_load_file = '../timeseries_data_files/Load/new_load_time_series_RT.csv'
+
+        for ix, load_time in enumerate(load_timeseries, start=0):
+            load_time_series_record = {}
+            load_time_series_record['Year'] = load_time.DateTime.year
+            load_time_series_record['Month'] = load_time.DateTime.month
+            load_time_series_record['Day'] = load_time.DateTime.day
+
+            if simulation == 'DAY_AHEAD':
+                load_time_series_record['Period'] = (ix % 24) + 1
+            else:
+                load_time_series_record['Period'] = (ix % (24*12)) + 1
+
+            for name, load in md_obj.elements('load'):
+                bus = elements['bus'][load['bus']]
+                area_load = getattr(load_time, bus['area'])
+
+                load_time_series_record[name] = round(bus_load_participation_factor_dict[name]*area_load, 2)
+                
+            new_load_time_series.append(load_time_series_record)
+
+        new_load_time_series_df = pd.DataFrame(new_load_time_series)
+        new_load_time_series_df = new_load_time_series_df[['Year', 'Month', 'Day', 'Period'] + new_load_time_series_df.columns[4:].tolist()]
+        new_load_time_series_fname = 'new_load_time_series_{0}.csv'.format('DA' if simulation == "DAY_AHEAD" else 'RT')
+        new_load_time_series_df.to_csv(os.path.join(data_dir, 'timeseries_data_files', 'Load', new_load_time_series_fname), index=False)
+
+        # Augment time series pointer dataframe.
+        for name, load in md_obj.elements('load'):
+            new_load_timeseries_spec = {}
+            new_load_timeseries_spec['Object'] = name
+            new_load_timeseries_spec['Parameter'] = 'Requirement'
+            new_load_timeseries_spec['Simulation'] = 'DAY_AHEAD'
+            new_load_timeseries_spec['Data File'] = day_ahead_load_file
+            timeseries_pointer_df = timeseries_pointer_df.append(new_load_timeseries_spec, ignore_index=True)
+
+            new_load_timeseries_spec = {}
+            new_load_timeseries_spec['Object'] = name
+            new_load_timeseries_spec['Parameter'] = 'Requirement'
+            new_load_timeseries_spec['Simulation'] = 'REAL_TIME'
+            new_load_timeseries_spec['Data File'] = real_time_load_file
+            timeseries_pointer_df = timeseries_pointer_df.append(new_load_timeseries_spec, ignore_index=True)
+        
+        timeseries_pointer_df.loc[timeseries_pointer_df['Object'] != 'Load'].to_csv(os.path.join(data_dir, 'SourceData', 'timeseries_pointers.csv'), index=False)
+
+def create_ModelData(data_dir, begin_time, end_time, simulation="DAY_AHEAD", t0_state = None):
+    """
+    Create a ModelData object from the input data.
+
+    Parameters
+    ----------
+    data_dir : str
+        Path to data directory
     begin_time : datetime.datetime or str
         Beginning of time horizon. If str, date/time in "YYYY-MM-DD HH:MM:SS" or "YYYY-MM-DD" format,
         the later of which assumes a midnight start.
@@ -203,7 +221,7 @@ def create_ModelData(rts_gmlc_dir, begin_time, end_time, simulation="DAY_AHEAD",
     egret.model_data.ModelData
         Returns a ModelData object with the timeseries data specified
     """
-    return md.ModelData(create_model_data_dict(rts_gmlc_dir, begin_time, end_time, simulation, t0_state))
+    return md.ModelData(create_model_data_dict(data_dir, begin_time, end_time, simulation, t0_state))
 
 def create_model_data_dict(rts_gmlc_dir, begin_time, end_time, simulation="DAY_AHEAD", t0_state = None):
 
@@ -863,10 +881,18 @@ if __name__ == '__main__':
     import matplotlib.pyplot as plt
 
     current_dir = os.path.dirname(os.path.abspath(__file__))
-    rts_gmlc_dir = os.path.join(current_dir, '..', '..', 'input', 'RTS_Data')
+    rts_gmlc_dir = os.path.join(current_dir, '..', '..', 'input', 'RTS_Data')  # This is just the root of the RTS-GMLC data set.
 
-    begin_time = "2020-07-01"
-    end_time = "2020-07-02"
+    # This converts the load data (in RTS-GMLC format) such that individual loads have their own time series explicitly specified (instead of one system-wide time series).
+    # It should only need to be run once.
+    convert_load_by_area_to_source(
+        rts_gmlc_dir, "2020-01-01", "2020-12-31", 
+        t0_state = None,
+        )
+
+    # Test model creation and UC solve for one day using the newly formatted data.
+    begin_time = "2020-07-05"
+    end_time = "2020-07-06"
 
     md = create_ModelData(
         rts_gmlc_dir, begin_time, end_time, 
@@ -875,15 +901,16 @@ if __name__ == '__main__':
         )
 
     solved_md = solve_unit_commitment(md,
-                        'cbc',
-                        mipgap = 0.001,
-                        timelimit = None,
-                        solver_tee = True,
-                        symbolic_solver_labels = False,
-                        options = None,
-                        uc_model_generator=create_tight_unit_commitment_model,
-                        relaxed=False,
-                        return_model=False)
+        'gurobi',
+        mipgap = 0.001,
+        timelimit = None,
+        solver_tee = True,
+        symbolic_solver_labels = False,
+        options = None,
+        uc_model_generator=create_tight_unit_commitment_model,
+        relaxed=False,
+        return_model=False
+        )
 
     fig, ax = generate_stack_graph(
         solved_md, 
